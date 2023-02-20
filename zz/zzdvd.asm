@@ -17,9 +17,8 @@
 	include	tbra.acm
 	include	typtx.acm
 
-; TODO: include proper file?
-AIO.DEV	equ	212fh
-AIO.CHA	equ	214eh
+	include	dirdef.acm
+	include	esint.acm
 
 	cseg
 base:

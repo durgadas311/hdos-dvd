@@ -1,0 +1,50 @@
+; CP/NET standard message format
+
+	org	0
+FMT	ds	1	; 10 for HDOS request, 11 for response
+DID	ds	1	; destination node ID
+SID	ds	1	; source node ID
+FNC	ds	1	; function to perform
+SIZ	ds	1	; paylod length - 1 (min 1 byte, FF = 256)
+DAT	ds	1	; payload starts here, at least one byte.
+HDRLEN	equ	DAT
+
+FMT.CPM	 equ	0	; 00/01 for request/response on CP/M
+FMT.HDOS equ	10h	; 10/11 for request/response on HDOS
+
+; HDOS request formats.
+; FNC is same as SCALL, except for .WRITE:
+;
+; .WRITE
+; +-----+-----+-----+-----+-----+----...----+
+; |  10 | SID | DID | 8** |  FF | DB0...255 |
+; +-----+-----+-----+-----+-----+----...----+
+; 8** = 1xxxxxxxB where 'xxxxxxx' is channel number
+; DB0..DB255 = data (sector) to write
+;
+; .OPEN*
+; +-----+-----+-----+-----+-----+----...----+
+; |  10 | SID | DID | FNC |  0D | DB0..DB14 |
+; +-----+-----+-----+-----+-----+----...----+
+; DB0 = channel number,
+; DB1..DB14 = decoded filename (fully-qualified filename)
+;
+; .CLOSE, .READ
+; +-----+-----+-----+-----+-----+-----+
+; |  10 | SID | DID | FNC |  00 | DB0 |
+; +-----+-----+-----+-----+-----+-----+
+; DB0 = channel number
+;
+; .CHFLG, .DELET, .LINK
+; +-----+-----+-----+-----+-----+----...----+
+; |  10 | SID | DID | FNC |  0C | DB0..DB13 |
+; +-----+-----+-----+-----+-----+----...----+
+; DB0..DB13 = decoded filename (fully-qualified filename)
+;
+; .RENAM
+; +-----+-----+-----+-----+-----+----...----+----...----+
+; |  10 | SID | DID |  29 |  1B | DB0..DB13 | DB14..DB27|
+; +-----+-----+-----+-----+-----+----...----+----...----+
+; DB0 = channel number,
+; DB1..DB13 = decoded old filename
+; DB14..DB27 = decoded new filename (dev ignored)

@@ -152,6 +152,8 @@ nwnop:	ana	a
 	ret			;DO NOTHING
 
 nwld:	; driver init
+	call	$TYPTX
+	db	NL,'_INIT',ENL
 	lhld	.UIVEC+18+1
 	shld	hdose+1
 	lxi	h,scint
@@ -166,20 +168,20 @@ nwul:	; driver kill - 3.0 only
 	xra	a
 	ret
 
-nwcls:	call	$TYPTX
+nwcls:	call	dbgtyptx
 	db	NL,'.CLOSE',' '+200q
 	mvi	a,.CLOSE
 	sta	mhdr+FNC
-	call	setch
+	call	setchZ
 	mvi	m,0ffh
 	xra	a
 	jmp	nwfnc
 
-nwrd:	call	$TYPTX
+nwrd:	call	dbgtyptx
 	db	NL,'.READ',' '+200q
 	mvi	a,.READ
 	sta	mhdr+FNC
-	call	setch
+	call	setchZ
 	; TODO: confirm is networked...
 	mvi	a,EC.EOF
 nwfnc:
@@ -187,12 +189,14 @@ nwfnc:
 	mvi	b,1
 	jmp	donet
 
-nwwr:	call	$TYPTX
+nwwr:	call	dbgtyptx
 	db	NL,'.WRITE',' '+200q
-	lda	S.CACC	; channel num
+	;lda	S.CACC	; channel num
+	lda	arg0	; TODO: during debug only
+	inr	a
 	ori	80h
 	sta	mhdr+FNC
-	call	setch
+	call	setchZ
 	; TODO: confirm networked...
 	xra	a	; no error
 	lxi	d,arg	; will be DMA address
@@ -201,19 +205,19 @@ nwwr:	call	$TYPTX
 
 ; .OPENR
 
-nwopr:	call	$TYPTX
+nwopr:	call	dbgtyptx
 	db	NL,'.OPENR',' '+200q
 	mvi	a,.OPENR
 	jmp	nwoc
 
 ; .OPENW
-nwopw:	call	$TYPTX
+nwopw:	call	dbgtyptx
 	db	NL,'.OPENW',' '+200q
 	mvi	a,.OPENW
 	jmp	nwoc
 
 ; .OPENU
-nwopu:	call	$TYPTX
+nwopu:	call	dbgtyptx
 	db	NL,'.OPENU',' '+200q
 	mvi	a,.OPENU
 	;jmp	nwoc
@@ -225,7 +229,7 @@ nwoc:
 	call	$MOVE
 	; TODO: translate device name: netcfg.map[unit].name
 	; also, check if mapped.
-	call	setch
+	call	setchZ
 	; TODO: not until after response
 	mvi	m,0	; server ID hosting open file
 	lxi	d,arg
@@ -265,6 +269,7 @@ fqfn2:	db	'DDUFILENAMETYP'
 	db	0,0,0,0,0
 retcod:	db	0
 netadr:	dw	0
+arg0:	db	0
 
 chtbl:	db	0ffh,0ffh,0ffh,0ffh,0ffh,0ffh	; how many channels max?
 	db	0ffh,0ffh
@@ -276,6 +281,9 @@ setch0:	inr	a
 	ani	7
 	lxi	h,chtbl
 	jmp	@DADA
+
+setchZ:	lda	arg0
+	jmp	setch0
 
 ; check SCALL with channel number
 ; always, only, .POSIT
@@ -313,14 +321,27 @@ donet:
 	call	hxd
 	pop	h
 	pop	b
+	mov	a,b
+	ora	a
+	jz	nothing
 	call	hxd0
 	mvi	a,NL
 	db	SYSCALL,.SCOUT
-	lda	retcod
+don0:	lda	retcod
 	ora	a
 	rz
 	stc
 	ret
+
+nothing:
+	call	$TYPTX
+	db	' ...',ENL
+	jmp	don0
+
+dbgtyptx:
+	lda	S.CACC
+	sta	arg0
+	jmp	$TYPTX
 
 hxd0:	mvi	a,' '
 	db	SYSCALL,.SCOUT

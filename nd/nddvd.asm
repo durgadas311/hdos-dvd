@@ -17,6 +17,8 @@
 
 	include	setcal.acm
 
+	include	hrom.acm
+
 	cseg
 BASE:
 	phase	($-BASE)+PIC.COD
@@ -142,8 +144,5 @@ NDREAD:	MVI	A,EC.EOF
 ;*	No operation
 NDNOP:	ANA	A
 	RET			;DO NOTHING
-
-	include	tbra.acm
-	include	typtx.acm
 
 	END

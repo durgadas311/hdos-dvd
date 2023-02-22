@@ -14,10 +14,7 @@
 	include	dvddef.acm
 	include	setcal.acm
 
-	include	tbra.acm
-	include	typtx.acm
-	include	move.acm
-	include	dada.acm
+	include	hrom.acm
 
 	include	dirdef.acm
 	include	esint.acm
@@ -119,13 +116,13 @@ SPL	equ	(PAD+511)/512
 	ds	PAD
 ; The resident portion of the driver
 nwdvd:
-	call	$TBRA
+	call	$TBRA	; preserves A
 	db	nwrd-$		; READ - DC.REA - 0
 	db	nwwr-$	 	; WRITE - DC.WRI - 1
 	db	nwilr-$ 	; READR - DC.RER - 2
-	db	nwopr-$ 	; OPENR - DC.OPR - 3
-	db	nwopw-$ 	; OPENW - DC.OPW - 4
-	db	nwopu-$ 	; OPENU - DC.OPU - 5
+opr:	db	nwld-$ 		; OPENR - DC.OPR - 3
+opw:	db	nwld-$ 		; OPENW - DC.OPW - 4
+opu:	db	nwld-$	 	; OPENU - DC.OPU - 5
 	db	nwcls-$		; CLOSE - DC.CLO - 6
 	db	nwnop-$		; ABORT - DC.ABT - 7
 	db	nwilr-$ 	; MOUNT - DC.MOU - 8
@@ -136,6 +133,8 @@ nwdvd:
 	db	nwul-$	 	; UNLOAD - DC.UNL - 12
 	db	nwilr-$ 	; INTERRUPT - DC.INT - 13
 	db	nwilr-$ 	; DEVICE SPECIFIC - DC.DSF - 14
+
+; AIO.DTA has our table entry?
 
 ;*	Illegal Request
 nwilr:	mvi	a,EC.ILR	;DEVICE DRIVER ABORT
@@ -152,12 +151,29 @@ nwnop:	ana	a
 	ret			;DO NOTHING
 
 nwld:	; driver init
+	push	psw	; DC.* code
 	call	$TYPTX
 	db	NL,'_INIT',ENL
+	pop	psw
+	; must preserve op code in A
+	push	psw	; DC.* code
 	lhld	.UIVEC+18+1
 	shld	hdose+1
 	lxi	h,scint
 	shld	.UIVEC+18+1
+	; repair op table
+	lxi	h,opr
+	mvi	m,nwopr-opr
+	inx	h
+	mvi	m,nwopw-opw
+	inx	h
+	mvi	m,nwopu-opu
+	lhld	AIO.DTA
+	call	$HLIHL	; HL = two-char dev name
+	shld	dvdnm
+	pop	psw
+	cpi	DC.LOD
+	jnz	nwdvd	; now execute true function
 	xra	a
 	ret
 
@@ -274,6 +290,8 @@ arg0:	db	0
 chtbl:	db	0ffh,0ffh,0ffh,0ffh,0ffh,0ffh	; how many channels max?
 	db	0ffh,0ffh
 
+dvdnm:	db	'W','N'	; replaced at init with actual name
+
 ; returns with HL = &chtbl[ch]
 setch:	lda	S.CACC
 setch0:	inr	a
@@ -378,25 +396,21 @@ check2:	; might also have BC param
 	mov	c,m
 	inx	h
 	mov	b,m
-chkddn:	; TODO: don't want to hard-code this...?
+chkddn:	; BC = dvd name, HL = unit-1
+	xchg
+	lhld	dvdnm
+	xchg
 	mov	a,c
-	cpi	'N'
+	xra	e
 	jnz	pass2
-	mov	a,b
-	cpi	'W'
+	mov	b,b
+	xra	d
 	jnz	pass2
 	inx	h	; unit number
 	mov	a,m	; already - '0' ?
-	add	a
-	inr	a
-	add	a
-	lxi	h,netcfg
-	call	@DADA
-	mov	a,m	; 0 = not configured
-	ani	80h
-	mvi	a,EC.UND
-	jz	error
-	shld	netadr
+	call	chkloc
+	jc	error
+; debug
 	lda	mhdr+FNC
 	cpi	.LINK
 	lxi	h,dblnk
@@ -412,22 +426,23 @@ gotit:	call	$TYPTX.
 	; TODO: translate device name
 	pop	h
 	pop	d
-	push	d
 	lxi	b,fqfn
 	call	hdose
 	db	.DECODE
-	pop	d
-	pop	h
+	pop	h	; new file name for .RENAM
+	rc
+	; TOFO: does 2nd file get decoded?
 	lda	mhdr+FNC
 	cpi	.RENAM
 	jnz	chkd1
+	lxi	d,$ZEROS
 	lxi	b,fqfn2
 	call	hdose
 	db	.DECODE
-chkd1:	lhld	netadr
-	inx	h
-	inx	h
-	inx	h	; server ID
+	rc
+chkd1:
+	call	setrem	; set remote dev name
+	lhld	netadr	; server ID
 	lxi	d,arg
 	mvi	b,fqfnl
 	xra	a	; no error
@@ -440,16 +455,36 @@ error:	pop	h
 	stc
 	ret
 
-netcfg:	db	0,0	; TODO: node ID, status
-	db	'sy0',0	; NW0 => SY0[00]
-	db	'sy1',0	; NW1 => SY1[00]
-	db	'sy2',0	; NW2 => SY2[00]
-	db	'sy3',0	; NW3 => SY3[00]
-	db	'sy4',0	; NW4 => SY4[00]
-	db	'sy5',0	; NW5 => SY5[00]
-	db	'sy6',0	; NW6 => SY6[00]
-	db	'sy7',0	; NW7 => SY7[00]
+; A = unit number
+chkloc:	add	a
+	inr	a
+	add	a	; A = (A * 4) + 2
+	lxi	h,netcfg
+	call	@DADA
+	shld	netadr
+	mov	a,m	; 0ffh = not configured
+	adi	1	; CY if 0ffh
+	mvi	a,EC.UND
+	ret
 
+setrem:	lhld	netadr	; server ID
+	inx	h	; remote dev name/unit
+	lxi	d,fqfn
+	xchg
+	lxi	b,3
+	jmp	$MOVE
+
+netcfg:	db	0,0	; TODO: node ID, status
+	db	0,'sy0'	; NW0 => SY0[00]
+	db	0,'sy1'	; NW1 => SY1[00]
+	db	0,'sy2'	; NW2 => SY2[00]
+	db	0,'sy3'	; NW3 => SY3[00]
+	db	0,'sy4'	; NW4 => SY4[00]
+	db	0,'sy5'	; NW5 => SY5[00]
+	db	0,'sy6'	; NW6 => SY6[00]
+	db	0,'sy7'	; NW7 => SY7[00]
+
+; debug
 hexout:	push	psw
 	rlc
 	rlc
@@ -464,3 +499,5 @@ hexdig:	ani	0fh
 	daa
 	db	SYSCALL,.SCOUT
 	ret
+
+	end

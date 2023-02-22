@@ -14,8 +14,7 @@
 	include	dvddef.acm
 	include	setcal.acm
 
-	include	tbra.acm
-	include	typtx.acm
+	include	hrom.acm
 
 	include	dirdef.acm
 	include	esint.acm

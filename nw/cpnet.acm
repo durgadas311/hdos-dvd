@@ -13,7 +13,8 @@ FMT.CPM	 equ	0	; 00/01 for request/response on CP/M
 FMT.HDOS equ	10h	; 10/11 for request/response on HDOS
 
 ; HDOS request formats.
-; FNC is same as SCALL, except for .WRITE:
+; FNC is same as SCALL, except for .WRITE.
+; Channel numbers are "normalized": HDOS channel -1 is "0".
 ;
 ; .WRITE
 ; +-----+-----+-----+-----+-----+----...----+
@@ -21,6 +22,7 @@ FMT.HDOS equ	10h	; 10/11 for request/response on HDOS
 ; +-----+-----+-----+-----+-----+----...----+
 ; 8** = 1xxxxxxxB where 'xxxxxxx' is channel number
 ; DB0..DB255 = data (sector) to write
+; Response: 1 byte error code on failure (0 on success).
 ;
 ; .OPEN*
 ; +-----+-----+-----+-----+-----+----...----+
@@ -28,23 +30,33 @@ FMT.HDOS equ	10h	; 10/11 for request/response on HDOS
 ; +-----+-----+-----+-----+-----+----...----+
 ; DB0 = channel number,
 ; DB1..DB14 = decoded filename (fully-qualified filename)
+; Response: 1 byte error code on failure (0 on success).
 ;
-; .CLOSE, .READ
+; .CLOSE
 ; +-----+-----+-----+-----+-----+-----+
-; |  10 | SID | DID | FNC |  00 | DB0 |
+; |  10 | SID | DID |  26 |  00 | DB0 |
 ; +-----+-----+-----+-----+-----+-----+
 ; DB0 = channel number
+; Response: 1 byte error code on failure (0 on success).
+;
+; .READ
+; +-----+-----+-----+-----+-----+-----+
+; |  10 | SID | DID |  04 |  00 | DB0 |
+; +-----+-----+-----+-----+-----+-----+
+; DB0 = channel number
+; Response: 256 bytes on success, 1 byte error code on failure.
 ;
 ; .CHFLG, .DELET, .LINK
 ; +-----+-----+-----+-----+-----+----...----+
 ; |  10 | SID | DID | FNC |  0C | DB0..DB13 |
 ; +-----+-----+-----+-----+-----+----...----+
 ; DB0..DB13 = decoded filename (fully-qualified filename)
+; Response: 1 byte error code on failure (0 on success).
 ;
 ; .RENAM
 ; +-----+-----+-----+-----+-----+----...----+----...----+
 ; |  10 | SID | DID |  29 |  1B | DB0..DB13 | DB14..DB27|
 ; +-----+-----+-----+-----+-----+----...----+----...----+
-; DB0 = channel number,
-; DB1..DB13 = decoded old filename
+; DB0..DB13 = decoded old filename
 ; DB14..DB27 = decoded new filename (dev ignored)
+; Response: 1 byte error code on failure (0 on success).

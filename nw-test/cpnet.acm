@@ -12,6 +12,10 @@ HDRLEN	equ	DAT
 FMT.CPM	 equ	0	; 00/01 for request/response on CP/M
 FMT.HDOS equ	10h	; 10/11 for request/response on HDOS
 
+; New functions added to HDOS
+.SERF	equ	17	; Search First (same as CP/M)
+.SERN	equ	18	; Search Next (same as CP/M)
+
 ; HDOS request formats.
 ; FNC is same as SCALL, except for .WRITE.
 ; Channel numbers are "normalized": HDOS channel -1 is "0".
@@ -25,9 +29,9 @@ FMT.HDOS equ	10h	; 10/11 for request/response on HDOS
 ; Response: 1 byte error code on failure (0 on success).
 ;
 ; .OPEN*
-; +-----+-----+-----+-----+-----+----...----+
-; |  10 | DID | SID | FNC |  0E | DB0..DB14 |
-; +-----+-----+-----+-----+-----+----...----+
+; +-----+-----+-----+-----+-----+-----+----...----+
+; |  10 | DID | SID | FNC |  0E | DB0 | DB1..DB14 |
+; +-----+-----+-----+-----+-----+-----+----...----+
 ; DB0 = channel number,
 ; DB1..DB14 = decoded filename (fully-qualified filename)
 ; Response: 1 byte error code on failure (0 on success).
@@ -47,7 +51,24 @@ FMT.HDOS equ	10h	; 10/11 for request/response on HDOS
 ; Response: 1 byte error code on failure.
 ;           256 bytes data on success
 ;
-; .CHFLG, .DELET, .LINK
+; .POSIT
+; +-----+-----+-----+-----+-----+-----+-----+-----+
+; |  10 | DID | SID |  27 |  02 | DB0 | DB1...DB2 |
+; +-----+-----+-----+-----+-----+-----+-----+-----+
+; DB0 = channel number
+; DB1..DB2 = sector address (little-endian)
+; Response: 1 byte error code on failure (0 on success).
+;
+; .CHFLG
+; +-----+-----+-----+-----+-----+-----+-----+-----+-----+
+; |  10 | DID | SID |  30 |  0F | DB0 | DB1 | DB2..DB15 |
+; +-----+-----+-----+-----+-----+-----+-----+-----+-----+
+; DB0 = mask (1 = clear bit)
+; DB1 = set (1 = set bit)
+; DB2..DB15 = decoded filename (fully-qualified filename)
+; Response: 1 byte error code on failure (0 on success).
+;
+; .DELET, .LINK
 ; +-----+-----+-----+-----+-----+----...----+
 ; |  10 | DID | SID | FNC |  0D | DB0..DB13 |
 ; +-----+-----+-----+-----+-----+----...----+
@@ -79,7 +100,8 @@ FMT.HDOS equ	10h	; 10/11 for request/response on HDOS
 ; Response: 1 byte error code on failure (EOF),
 ;           23 byte directory entry on success
 ;
-; All responses generically:
+; - - - - - - - - - - - - - - - - - - - - - - - - -
+; All responses, generically:
 ; +-----+-----+-----+-----+-----+-----+-----+
 ; |  11 | DID | SID | FNC | SIZ | DB0...DBn |
 ; +-----+-----+-----+-----+-----+-----+-----+

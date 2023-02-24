@@ -143,7 +143,7 @@ opu:	db	nwld-$	 	; OPENU - DC.OPU - 5
 	db	nwilr-$ 	; SET - DC.SET - 11
 	db	nwul-$	 	; UNLOAD - DC.UNL - 12
 	db	nwilr-$ 	; INTERRUPT - DC.INT - 13
-	db	nwilr-$ 	; DEVICE SPECIFIC - DC.DSF - 14
+	db	nwdsf-$ 	; DEVICE SPECIFIC - DC.DSF - 14
 
 ; AIO.DTA has our table entry?
 
@@ -162,39 +162,9 @@ nwnop:	ana	a
 	ret			;DO NOTHING
 
 nwld:	; driver init
-	; must preserve op code in A
-	push	psw	; DC.* code
-	lhld	.UIVEC+18+1
-	shld	hdose+1
-	lxi	h,scint
-	shld	.UIVEC+18+1
-	; repair op table
-	lxi	h,opr
-	mvi	m,nwopr-opr
-	inx	h
-	mvi	m,nwopw-opw
-	inx	h
-	mvi	m,nwopu-opu
-	lhld	AIO.DTA
-	call	$HLIHL	; HL = two-char dev name
-	shld	dvdnm
-	lhld	S.SYSM	; make us resident...
-	shld	S.RFWA	; (how does this work?)
-	lhld	AIO.DTA	; Flag this driver as perm-res
-	lxi	d,DEV.RES
-	dad	d
-	mov	a,m
-	ori	DR.PR	; keep ourself in memory
-	mov	m,a
-	pop	psw
-	cpi	DC.LOD
-	jnz	nwdvd	; now execute true function
-	xra	a
-	ret
+	jmp	nwinit
 
-nwul:	; driver kill - 3.0 only
-	lhld	hdose+1
-	shld	.UIVEC+18+1
+nwul:	; driver kill - 3.0 only (not called anyway?)
 	; TODO: shutdown network
 	xra	a
 	ret
@@ -203,22 +173,20 @@ nwcls:
  if DEBUG
 	lxi	h,dbcls
 	shld	dbtag
+	xra	a	; no error
+	sta	retcod
  endif
 	lda	S.CACC	; channel num
 	sta	arg0
 	mvi	a,.CLOSE
 	sta	mhdr+FNC
 	call	setch
- if DEBUG
 	mov	a,m
 	sta	mhdr+DID
-	mvi	m,0ffh
-	lxi	h,mhdr+DID	; no-op later setting
-	xra	a	; no error
- else
-	mov	a,m
 	inr	a
 	rz	; already closed
+ if DEBUG
+	mvi	m,0ffh
  endif
 	lxi	d,arg
 	mvi	b,1
@@ -229,6 +197,8 @@ nwrd:
  if DEBUG
 	lxi	h,dbrd
 	shld	dbtag
+	mvi	a,EC.EOF
+	sta	retcod
  endif
 	lda	S.CACC	; channel num
 	sta	arg0
@@ -236,18 +206,18 @@ nwrd:
 	sta	mhdr+FNC
 	call	savio	; save I/O params
 	call	setch
- if DEBUG
-	; TODO: confirm is networked...
-	mvi	a,EC.EOF
- else
 	mov	a,m
+	sta	mhdr+DID
 	inr	a
 	mvi	a,EC.FNO
 	stc
 	rz	; nothing open
+ if DEBUG
+	lxi	d,arg	; will be DMA address
+ else
+	; DE = dma addr (data to write)
  endif
 	; TODO: need to loop until count == 0
-	lxi	d,arg
 	mvi	b,1
 	jmp	donet
 
@@ -256,6 +226,8 @@ nwwr:
  if DEBUG
 	lxi	h,dbwr
 	shld	dbtag
+	xra	a	; no error
+	sta	retcod
  endif
 	lda	S.CACC	; channel num
 	sta	arg0
@@ -264,15 +236,15 @@ nwwr:
 	sta	mhdr+FNC
 	call	savio	; save I/O params
 	call	setch
- if DEBUG
-	xra	a
-	lxi	d,arg	; will be DMA address
- else
 	mov	a,m	; 0ffh = not open
+	sta	mhdr+DID
 	inr	a
 	mvi	a,EC.FNO
 	stc
 	rz	; nothing open
+ if DEBUG
+	lxi	d,arg	; will be DMA address
+ else
 	; DE = dma addr (data to write)
  endif
 	; TODO: need to loop until count == 0
@@ -305,9 +277,73 @@ nwopu:
 	shld	dbtag
  endif
 	mvi	a,.OPENU
-	;jmp	nwoc
+	jmp	nwoc
+
+; A = DC.DSF
+; C = function (syscall code)
+; B = channel (if used)
+; DE = parameter (depends on function)
+; HL = parameter (depends on function)
+; .POSIT:  A = channel, BC = sector (DE)
+; .DELET:  DE = def block, HL = file string
+; .RENAM:  DE = def block, HL = { old name, new name }
+; .LINK:   DE = def block, HL = file string
+; .SERF: * DE = buffer, HL = { def block, file string }
+; .SERN: * DE = buffer
+nwdsf:	mov	a,b	; might be channel
+	sta	arg0
+	mov	a,c
+	sta	mhdr+FNC
+	cpi	.NTCFG
+	jz	getcfg
+	cpi	.POSIT
+	jz	intpos
+	cpi	.SERF
+	jz	intfrs
+	cpi	.SERN
+	jz	intnxt
+	cpi	.RENAM
+	jz	intren
+	jmp	intdef	; DE/HL file description
+; ----- end of relative jump targets -----
+
+getcfg:	lxi	h,netcfg
+	ora	a
+	ret
+
+nwinit:
+	; must preserve op code in A
+	push	psw	; DC.* code
+	; repair op table
+	lxi	h,opr
+	mvi	m,nwopr-opr
+	inx	h
+	mvi	m,nwopw-opw
+	inx	h
+	mvi	m,nwopu-opu
+	lhld	AIO.DTA
+	call	$HLIHL	; HL = two-char dev name
+	shld	dvdnm
+	lhld	S.SYSM	; make us resident...
+	shld	S.RFWA	; (how does this work?)
+	lhld	AIO.DTA	; Flag this driver as perm-res
+	lxi	d,DEV.RES
+	dad	d
+	mov	a,m
+	ori	DR.PR	; keep ourself in memory
+	mov	m,a
+	pop	psw
+	cpi	DC.LOD
+	jnz	nwdvd	; now execute true function
+	xra	a
+	ret
+
 nwoc:
 	sta	mhdr+FNC
+ if DEBUG
+	xra	a	; no error
+	sta	retcod
+ endif
 	lda	S.CACC	; channel number
 	sta	arg0
 	lxi	d,AIO.DEV
@@ -319,21 +355,18 @@ nwoc:
 	call	chkloc
 	rc	; device has no remote mapping
 	; TODO: server ID is in (HL) (netadr)
+	mov	a,m	; NID of server
+	sta	mhdr+DID
  if DEBUG
 	; TODO: not until after response
-	mov	a,m	; NID of server
 	push	psw
 	call	setch
 	pop	psw
 	mov	m,a	; server ID hosting open file
  endif
 	call	setrem	; change "NWx" to mapped remote device/unit
-	lhld	netadr
 	lxi	d,arg
 	mvi	b,fqfnl
- if DEBUG
-	xra	a	; no error
- endif
 	jmp	donet
 
 ; save DE and BC for .READ/.WRITE ops
@@ -345,30 +378,6 @@ savio:	xchg
 	shld	iocnt
 	pop	h
 	ret
-
-; SCALL intercept
-scint:	sta	arg0
-	xthl
-	mov	a,m
-	sta	mhdr+FNC
-	xthl	; TODO: wait to do this?
-	cpi	.POSIT
-	jz	intpos
-	cpi	.LINK
-	jz	check2
-	cpi	.RENAM
-	jz	check2
-	cpi	.DELET
-	jz	check2
-	cpi	.CHFLG
-	jz	check2
-pass:	lda	arg0
-hdose:	jmp	$-$	; link to HDOS
-
-pass2:	pop	h
-	pop	d
-	pop	b
-	jmp	pass
 
 mhdr:	db	0,0,0,0,0
 arg:	db	0	; channel number (typ)
@@ -386,58 +395,67 @@ chtbl:	db	0ffh,0ffh,0ffh,0ffh,0ffh,0ffh	; how many channels max?
 dvdnm:	db	'W','N'	; replaced at init with actual name
 dmaadr:	dw	0
 iocnt:	dw	0
+currch:	dw	0
 
 ; returns with HL = &chtbl[ch]
 setch:	lda	arg0
-setch0:	inr	a
+	inr	a
 	sta	arg
 	ani	7	; TODO: needed?
 	lxi	h,chtbl
-	jmp	@DADA
+	call	@DADA
+	shld	currch
+	ret
+
+; .SERN - DE = buffer
+intnxt:	xchg
+	shld	dmaadr
+ if DEBUG
+	lxi	h,dbsrn
+	shld	dbtag
+	mvi	a,EC.EOF
+	sta	retcod
+ endif
+	lxi	d,arg
+	mvi	b,1
+	jmp	donet
 
 ; .POSIT - check SCALL with channel number
 intpos:
  if DEBUG
 	lxi	h,dbpos
 	shld	dbtag
- endif
-	lda	arg
-	call	setch0
-	mov	a,m	; 0ffh = not networked
-	inr	a
-	jz	error
 	xra	a	; no error
-	lxi	d,arg	; DE => channel number
-	mvi	b,1
-; skip SCALL function code
-donet0:
-	xthl
-	inx	h
-	xthl
-; HL => server ID (&chtbl[ch])
+	sta	retcod
+ endif
+	; B = channel, DE has sector address
+	mov	a,b
+	sta	arg0
+	xchg
+	shld	arg+1	; put sec adr in message buffer
+	call	setch
+	mov	a,m	; 0ffh = not networked
+	sta	mhdr+DID
+	inr	a
+	jz	notnet
+	lxi	d,arg	; DE => channel number, sec adr
+	mvi	b,3
 ; DE => payload
 ; B = payload length (00 = 256)
-; A = return code
-; TODO: need to translate local dev to remote dev...
+; DID, FNC already set
 donet:
- if DEBUG
-	sta	retcod	; normally, retcod comes from response
- endif
-	mov	a,m
-	sta	mhdr+DID
 	mov	a,b
 	dcr	a
 	sta	mhdr+SIZ
-	; FNC already set
 	mvi	a,FMT.HDOS
 	sta	mhdr+FMT
 	;... pass call to server...
  if DEBUG
+; debug: print the message
 	lda	netcfg+1
 	sta	mhdr+SID	; normally done by snios?
-; debug: print the message
 	lhld	dbtag
-	call	typtx.
+	call	$TYPTX.
 	push	b
 	push	d
 	lxi	h,mhdr
@@ -474,7 +492,7 @@ don2:	; .READ - nothing was returned (EOF)
 	mov	b,h
 don1:
  endif
-	lda	retcod
+retout:	lda	retcod
 	ora	a
 	rz
 	stc
@@ -482,7 +500,7 @@ don1:
 
  if DEBUG
 nothing:
-	call	typtx
+	call	$TYPTX
 	db	' ...',ENL
 	jmp	don0
 
@@ -507,22 +525,7 @@ hexdig:	ani	0fh
 	daa
 	aci	40h
 	daa
-conout:	call	hdose
-	db	.SCOUT
-	ret
-
-; avoid passing through DVD for these calls from us
-typtx:	xthl
-	call	typtx.
-	xthl
-	ret
-typtx.:	mov	a,m
-	ani	7fh
-	call	hdose
-	db	.SCOUT
-	cmp	m
-	inx	h
-	jz	typtx.
+conout:	db	SYSCALL,.SCOUT
 	ret
 
 dbtag:	dw	0
@@ -537,43 +540,66 @@ dbdel:	db	NL,'.DELET',' '+200q
 dblnk:	db	NL,'.LINK',' '+200q
 dbren:	db	NL,'.RENAM',' '+200q
 dbchf:	db	NL,'.CHFLG',' '+200q
+dbsrf:	db	NL,'.SERF',' '+200q
+dbsrn:	db	NL,'.SERN',' '+200q
  endif
 
+; .SERF - DE = buffer, HL = { def block, file desc }
+intfrs:	xchg
+	shld	dmaadr
+	xchg
+	mov	e,m	; defaul block
+	inx	h
+	mov	d,m
+	inx	h
+	mov	a,m	; file desc
+	inx	h
+	mov	h,m
+	mov	l,a
+	jmp	intdef
+
+; .RENAM - two file descs at (HL)
+intren:
+	push	d	; default block
+	mov	e,m	; old file desc
+	inx	h
+	mov	d,m
+	inx	h
+	mov	a,m	; new file desc
+	inx	h
+	mov	h,m
+	mov	l,a
+	xchg
+	xthl
+	xchg
+	push	d	; default block (old file desc)
+	lxi	b,fqfn2
+	db	SYSCALL,.DECODE
+	pop	d	; default block
+	pop	h	; old file desc
+	jc	error
 ; check SCALL with file desc and default block
-check2:	; might also have BC param
-	push	b
-	push	d
-	push	h
-	; try and do this quickly, else need to call .DECODE...
-	; (which means doing that twice for the local case)
-	mov	c,m	; possible device name
-	inx	h
-	mov	b,m
-	inx	h
-	mvi	a,':'
-	cmp	m
-	jz	chkddn
-	inx	h
-	cmp	m
-	jz	chkddn
-	xchg
-	mov	c,m
-	inx	h
-	mov	b,m
-chkddn:	; BC = dvd name, HL = unit-1
-	xchg
+intdef:	; DE = def block, HL = file desc
+	lxi	b,fqfn
+	db	SYSCALL,.DECODE
+	jc	error
 	lhld	dvdnm
 	xchg
-	mov	a,c
-	xra	e
-	jnz	pass2
-	mov	b,b
-	xra	d
-	jnz	pass2
-	inx	h	; unit number
-	mov	a,m	; already - '0' ?
+	lhld	fqfn
+	call	$CDEHL
+	jnz	notnet
+	lda	mhdr+FNC
+	cpi	.RENAM
+	jnz	chkd1
+	lhld	fqfn2	; TODO: might be 0000?
+	call	$CDEHL
+	jnz	notnet
+chkd1:
+	xra	a
+	sta	retcod
+	lda	fqfn+2	; unit number
 	call	chkloc
-	jc	error
+	jc	retout
  if DEBUG
 	lda	mhdr+FNC
 	cpi	.LINK
@@ -585,40 +611,23 @@ chkddn:	; BC = dvd name, HL = unit-1
 	cpi	.DELET
 	lxi	h,dbdel
 	jz	gotit
+	cpi	.CHFLG
 	lxi	h,dbchf
+	jz	gotit
+	lxi	h,dbsrf
+	mvi	a,EC.EOF
+	sta	retcod
 gotit:	shld	dbtag
  endif
-	; TODO: translate device name
-	pop	h
-	pop	d
-	lxi	b,fqfn
-	call	hdose
-	db	.DECODE
-	pop	h	; new file name for .RENAM
-	rc
-	; TOFO: does 2nd file get decoded?
-	lda	mhdr+FNC
-	cpi	.RENAM
-	jnz	chkd1
-	lxi	d,$ZEROS
-	lxi	b,fqfn2
-	call	hdose
-	db	.DECODE
-	rc
-chkd1:
 	call	setrem	; set remote dev name
-	lhld	netadr	; server ID
 	lxi	d,arg
 	mvi	b,fqfnl
-	xra	a	; no error
-	jmp	donet0
+	jmp	donet
 
-; A = error code
-error:	pop	h
-	pop	d
-	pop	b
-	stc
-	ret
+; device not networked error
+notnet:	mvi	a,EC.UND
+error:	sta	retcod
+	jmp	retout
 
 ; Check local drive config
 ; A = unit number
@@ -656,6 +665,7 @@ netcfg:	db	0	; network status byte
 	db	5,'sy5'	; NW5 => SY5[05]
 	db	6,'sy6'	; NW6 => SY6[06]
 	db	7,'sy7'	; NW7 => SY7[07]
+; TODO	db	0,'lp5'	; LP0 => LP5[00]
  endif
 
 	end

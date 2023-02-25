@@ -188,8 +188,10 @@ nwcls:
  if DEBUG
 	mvi	m,0ffh
  endif
-	lxi	d,arg
-	mvi	b,1
+	lxi	h,arg
+	shld	datptr
+	mvi	a,1
+	sta	datlen
 	jmp	donet
 
 ; DE = dma addr, BC = xfer count (C==0)
@@ -212,13 +214,10 @@ nwrd:
 	mvi	a,EC.FNO
 	stc
 	rz	; nothing open
- if DEBUG
-	lxi	d,arg	; will be DMA address
- else
-	; DE = dma addr (data to write)
- endif
-	; TODO: need to loop until count == 0
-	mvi	b,1
+	lxi	h,arg	; channel number
+	shld	datptr
+	mvi	a,1
+	sta	datlen
 	jmp	donet
 
 ; DE = dma addr, BC = xfer count (C==0)
@@ -243,12 +242,15 @@ nwwr:
 	stc
 	rz	; nothing open
  if DEBUG
-	lxi	d,arg	; will be DMA address
+	lxi	h,arg	; dummy, nothing sent in DEBUG
  else
 	; DE = dma addr (data to write)
+	lhld	dmaadr
  endif
+	shld	datptr
 	; TODO: need to loop until count == 0
-	mvi	b,0
+	mvi	a,0	; 256 (0 if DEBUG)
+	sta	datlen
 	jmp	donet
 
 ; .OPENR
@@ -288,6 +290,7 @@ nwopu:
 ; .DELET:  DE = def block, HL = file string
 ; .RENAM:  DE = def block, HL = { old name, new name }
 ; .LINK:   DE = def block, HL = file string
+; .CHFLG:  DE = mask/set, HL = { def block, file string }
 ; .SERF: * DE = buffer, HL = { def block, file string }
 ; .SERN: * DE = buffer
 nwdsf:	mov	a,b	; might be channel
@@ -296,14 +299,22 @@ nwdsf:	mov	a,b	; might be channel
 	sta	mhdr+FNC
 	cpi	.NTCFG
 	jz	getcfg
-	cpi	.POSIT
+	cpi	.POSIT	; channel, sector-address
 	jz	intpos
-	cpi	.SERF
+	cpi	.SERF	; arg, fqfnl+1
 	jz	intfrs
-	cpi	.SERN
+	cpi	.SERN	; (none)
 	jz	intnxt
-	cpi	.RENAM
+	cpi	.RENAM	; fqfn, fqfn2l
 	jz	intren
+	cpi	.CHFLG
+	jz	intchf
+	push	h
+	lxi	h,fqfn	; most are fqfn, fqfnl
+	shld	datptr
+	mvi	a,fqfnl
+	sta	datlen
+	pop	h
 	jmp	intdef	; DE/HL file description
 ; ----- end of relative jump targets -----
 
@@ -312,8 +323,14 @@ getcfg:	lxi	h,netcfg
 	ret
 
 nwinit:
-	; must preserve op code in A
+	; must preserve op code in A, but also S.CACC
 	push	psw	; DC.* code
+	lda	S.CACC
+	push	psw
+	SCALL	.VERS
+	sta	hver
+	pop	psw
+	sta	S.CACC
 	; repair op table
 	lxi	h,opr
 	mvi	m,nwopr-opr
@@ -348,7 +365,7 @@ nwoc:
 	sta	arg0
 	lxi	d,AIO.DEV
 	lxi	h,fqfn
-	lxi	b,fqfnl-1
+	lxi	b,fqfnl
 	call	$MOVE
 	; check if device is remote
 	lda	fqfn+2	; unit num
@@ -365,8 +382,10 @@ nwoc:
 	mov	m,a	; server ID hosting open file
  endif
 	call	setrem	; change "NWx" to mapped remote device/unit
-	lxi	d,arg
-	mvi	b,fqfnl
+	lxi	h,arg
+	shld	datptr
+	mvi	a,fqfnl+1
+	sta	datlen
 	jmp	donet
 
 ; save DE and BC for .READ/.WRITE ops
@@ -380,10 +399,12 @@ savio:	xchg
 	ret
 
 mhdr:	db	0,0,0,0,0
+arg2:	db	0
 arg:	db	0	; channel number (typ)
 fqfn:	db	'DDUFILENAMETYP'
-fqfnl	equ	$-arg	; whole message length
+fqfnl	equ	$-fqfn
 fqfn2:	db	'DDUFILENAMETYP'
+fqfn2l	equ	$-fqfn
 	db	0,0,0,0,0
 retcod:	db	0
 netadr:	dw	0
@@ -392,10 +413,13 @@ arg0:	db	0
 chtbl:	db	0ffh,0ffh,0ffh,0ffh,0ffh,0ffh	; how many channels max?
 	db	0ffh,0ffh
 
+hver:	db	0
 dvdnm:	db	'W','N'	; replaced at init with actual name
 dmaadr:	dw	0
 iocnt:	dw	0
 currch:	dw	0
+datptr:	dw	0
+datlen:	db	0
 
 ; returns with HL = &chtbl[ch]
 setch:	lda	arg0
@@ -416,8 +440,10 @@ intnxt:	xchg
 	mvi	a,EC.EOF
 	sta	retcod
  endif
-	lxi	d,arg
-	mvi	b,1
+	lxi	h,arg
+	shld	datptr
+	mvi	a,1
+	sta	datlen
 	jmp	donet
 
 ; .POSIT - check SCALL with channel number
@@ -438,13 +464,15 @@ intpos:
 	sta	mhdr+DID
 	inr	a
 	jz	notnet
-	lxi	d,arg	; DE => channel number, sec adr
-	mvi	b,3
+	lxi	h,arg	; channel number, sec adr
+	shld	datptr
+	mvi	a,3
+	sta	datlen
 ; DE => payload
 ; B = payload length (00 = 256)
 ; DID, FNC already set
 donet:
-	mov	a,b
+	lda	datlen
 	dcr	a
 	sta	mhdr+SIZ
 	mvi	a,FMT.HDOS
@@ -456,16 +484,14 @@ donet:
 	sta	mhdr+SID	; normally done by snios?
 	lhld	dbtag
 	call	$TYPTX.
-	push	b
-	push	d
 	lxi	h,mhdr
 	mvi	b,DAT
 	call	hxd
-	pop	h
-	pop	b
-	mov	a,b
+	lda	datlen
 	ora	a
 	jz	nothing
+	mov	b,a
+	lhld	datptr
 	call	hxd0
 	mvi	a,NL
 	call	conout
@@ -525,7 +551,7 @@ hexdig:	ani	0fh
 	daa
 	aci	40h
 	daa
-conout:	db	SYSCALL,.SCOUT
+conout:	SCALL	.SCOUT
 	ret
 
 dbtag:	dw	0
@@ -544,11 +570,28 @@ dbsrf:	db	NL,'.SERF',' '+200q
 dbsrn:	db	NL,'.SERN',' '+200q
  endif
 
+; .CHFLG... arg2, fqfnl+2 (*)
+; E = mask, D = set, HL = { def block, file desc }
+intchf:
+	xchg
+	shld	arg2
+	lxi	h,arg2
+	shld	datptr
+	mvi	a,fqfnl+2
+	sta	datlen
+	jmp	intcom
+
 ; .SERF - DE = buffer, HL = { def block, file desc }
 intfrs:	xchg
 	shld	dmaadr
-	xchg
-	mov	e,m	; defaul block
+	lda	hver
+	lxi	h,arg
+	mov	m,a
+	shld	datptr
+	mvi	a,fqfnl+1
+	sta	datlen
+intcom:	xchg
+	mov	e,m	; default block
 	inx	h
 	mov	d,m
 	inx	h
@@ -560,28 +603,36 @@ intfrs:	xchg
 
 ; .RENAM - two file descs at (HL)
 intren:
+	push	h
+	mvi	a,fqfn2l
+	sta	datlen
+	lxi	h,fqfn
+	shld	datptr
+	pop	h
 	push	d	; default block
 	mov	e,m	; old file desc
 	inx	h
-	mov	d,m
+	mov	d,m	; DE = old file
 	inx	h
 	mov	a,m	; new file desc
 	inx	h
 	mov	h,m
-	mov	l,a
-	xchg
-	xthl
-	xchg
+	mov	l,a	; HL = new file
+	xchg		; DE = new, HL = old
+	xthl		; HL = default block, save old file
+	xchg		; DE = def, HL = new
 	push	d	; default block (old file desc)
-	lxi	b,fqfn2
-	db	SYSCALL,.DECODE
+	lxi	b,fqfn2-1
+	SCALL	.DECODE
 	pop	d	; default block
 	pop	h	; old file desc
 	jc	error
 ; check SCALL with file desc and default block
+; datptr/datlen must already be set
+; also entering here: .SERF, .RENAM, .CHFLG
 intdef:	; DE = def block, HL = file desc
-	lxi	b,fqfn
-	db	SYSCALL,.DECODE
+	lxi	b,fqfn-1
+	SCALL	.DECODE
 	jc	error
 	lhld	dvdnm
 	xchg
@@ -595,12 +646,12 @@ intdef:	; DE = def block, HL = file desc
 	call	$CDEHL
 	jnz	notnet
 chkd1:
-	xra	a
-	sta	retcod
 	lda	fqfn+2	; unit number
 	call	chkloc
 	jc	retout
  if DEBUG
+	xra	a
+	sta	retcod
 	lda	mhdr+FNC
 	cpi	.LINK
 	lxi	h,dblnk
@@ -620,8 +671,6 @@ chkd1:
 gotit:	shld	dbtag
  endif
 	call	setrem	; set remote dev name
-	lxi	d,arg
-	mvi	b,fqfnl
 	jmp	donet
 
 ; device not networked error

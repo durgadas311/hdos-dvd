@@ -288,11 +288,10 @@ nwopu:
 ; DE = parameter (depends on function)
 ; HL = parameter (depends on function)
 ; .POSIT:  A = channel, BC = sector (DE)
-; .DELET:  DE = def block, HL = file string
-; .RENAM:  DE = def block, HL = { old name, new name }
-; .LINK:   DE = def block, HL = file string
-; .CHFLG:  DE = mask/set, HL = { def block, file string }
-; .SERF: * DE = buffer, HL = decoded file string
+; .DELET:  HL = decoded file desc (ambiguous)
+; .RENAM:  DE = new file desc, HL = old file desc
+; .CHFLG:  DE = bits/mask, HL = decoded file desc
+; .SERF: * DE = buffer, HL = decoded file desc (ambiguous)
 ; .SERN: * DE = buffer
 nwdsf:	mov	a,b	; might be channel
 	sta	arg0
@@ -316,7 +315,7 @@ nwdsf:	mov	a,b	; might be channel
 	mvi	a,fqfnl
 	sta	datlen
 	pop	h
-	jmp	intdef	; DE/HL file description
+	jmp	intdef	; HL file descriptor
 ; ----- end of relative jump targets -----
 
 getcfg:	lxi	h,netcfg
@@ -469,8 +468,8 @@ intpos:
 	shld	datptr
 	mvi	a,3
 	sta	datlen
-; DE => payload
-; B = payload length (00 = 256)
+; datptr => payload
+; datlen = payload length (00 = 256)
 ; DID, FNC already set
 donet:
 	lda	datlen
@@ -564,7 +563,6 @@ dbrd:	db	NL,'.READ',' '+200q
 dbwr:	db	NL,'.WRITE',' '+200q
 dbpos:	db	NL,'.POSIT',' '+200q
 dbdel:	db	NL,'.DELET',' '+200q
-dblnk:	db	NL,'.LINK',' '+200q
 dbren:	db	NL,'.RENAM',' '+200q
 dbchf:	db	NL,'.CHFLG',' '+200q
 dbsrf:	db	NL,'.SERF',' '+200q
@@ -572,23 +570,15 @@ dbsrn:	db	NL,'.SERN',' '+200q
  endif
 
 ; .CHFLG... arg2, fqfnl+2 (*)
-; E = mask, D = set, HL = { def block, file desc }
+; E = mask, D = set, HL = file desc
 intchf:
 	xchg
-	shld	arg2
+	shld	arg2	; bits/mask
 	lxi	h,arg2
 	shld	datptr
 	mvi	a,fqfnl+2
 	sta	datlen
-	xchg
-	mov	e,m	; default block
-	inx	h
-	mov	d,m
-	inx	h
-	mov	a,m	; file desc
-	inx	h
-	mov	h,m
-	mov	l,a
+	xchg		; file desc to HL
 	jmp	intdef
 
 ; .SERF - DE = buffer, HL = decoded ambiguous file desc
@@ -598,48 +588,32 @@ intfrs:	xchg
 	lxi	h,arg
 	mov	m,a
 	shld	datptr
-	inx	h	; fqfn
-	lxi	b,14
-	call	$MOVE	; copy into fqfn
 	mvi	a,fqfnl+1
 	sta	datlen
-	; need to check device and map it, but skip .DECODE...
-	jmp	intdf0
+	xchg		; file desc to HL
+	jmp	intdef
 
-; .RENAM - two file descs at (HL)
+; .RENAM - two file descs at (DE),(HL)
 intren:
-	push	h
+	push	h	; old file
 	mvi	a,fqfn2l
 	sta	datlen
 	lxi	h,fqfn
 	shld	datptr
-	pop	h
-	push	d	; default block
-	mov	e,m	; old file desc
-	inx	h
-	mov	d,m	; DE = old file
-	inx	h
-	mov	a,m	; new file desc
-	inx	h
-	mov	h,m
-	mov	l,a	; HL = new file
-	xchg		; DE = new, HL = old
-	xthl		; HL = default block, save old file
-	xchg		; DE = def, HL = new
-	push	d	; default block (old file desc)
-	lxi	b,fqfn2-1
-	SCALL	.DECODE
-	pop	d	; default block
-	pop	h	; old file desc
-	jc	error
+	lxi	h,fqfn2
+	lxi	b,fqfnl
+	call	$MOVE	; copy new file desc
+	pop	h	; old file
 ; check SCALL with file desc and default block
 ; datptr/datlen must already be set
 ; also entering here: .SERF, .RENAM, .CHFLG
-intdef:	; DE = def block, HL = file desc
-	lxi	b,fqfn-1
-	SCALL	.DECODE
-	jc	error
-intdf0:	lhld	dvdnm
+intdef:	; HL = file desc, datptr,datlen already set
+	xchg	; DE is source of $MOVE
+	lxi	h,fqfn
+	lxi	b,fqfnl
+	call	$MOVE
+	; now check for network dev
+	lhld	dvdnm
 	xchg
 	lhld	fqfn
 	call	$CDEHL
@@ -658,9 +632,6 @@ chkd1:
 	xra	a
 	sta	retcod
 	lda	mhdr+FNC
-	cpi	.LINK
-	lxi	h,dblnk
-	jz	gotit
 	cpi	.RENAM
 	lxi	h,dbren
 	jz	gotit
@@ -670,8 +641,11 @@ chkd1:
 	cpi	.CHFLG
 	lxi	h,dbchf
 	jz	gotit
+	cpi	.SERN
+	lxi	h,dbsrn
+	jz	gotit0
 	lxi	h,dbsrf
-	mvi	a,EC.EOF
+gotit0:	mvi	a,EC.EOF
 	sta	retcod
 gotit:	shld	dbtag
  endif

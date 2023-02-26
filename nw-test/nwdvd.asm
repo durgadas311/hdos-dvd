@@ -32,7 +32,8 @@ DEBUG	equ	1
 base:
 	phase	($-base)+PIC.COD
 
-NDCAP	equ	DT.CR+DT.CW		;read/write
+; We might be identifiable by (DT.RN && !DT.DD)
+NDCAP	equ	DT.CR+DT.CW+DT.RN	;read/write/random
 NDMAX	equ	8
 
 	db	DVDFLV		;DEVICE DRIVER FLAG VALUE
@@ -291,7 +292,7 @@ nwopu:
 ; .RENAM:  DE = def block, HL = { old name, new name }
 ; .LINK:   DE = def block, HL = file string
 ; .CHFLG:  DE = mask/set, HL = { def block, file string }
-; .SERF: * DE = buffer, HL = { def block, file string }
+; .SERF: * DE = buffer, HL = decoded file string
 ; .SERN: * DE = buffer
 nwdsf:	mov	a,b	; might be channel
 	sta	arg0
@@ -414,7 +415,7 @@ chtbl:	db	0ffh,0ffh,0ffh,0ffh,0ffh,0ffh	; how many channels max?
 	db	0ffh,0ffh
 
 hver:	db	0
-dvdnm:	db	'W','N'	; replaced at init with actual name
+dvdnm:	dw	'NW'	; replaced at init with actual name
 dmaadr:	dw	0
 iocnt:	dw	0
 currch:	dw	0
@@ -579,18 +580,7 @@ intchf:
 	shld	datptr
 	mvi	a,fqfnl+2
 	sta	datlen
-	jmp	intcom
-
-; .SERF - DE = buffer, HL = { def block, file desc }
-intfrs:	xchg
-	shld	dmaadr
-	lda	hver
-	lxi	h,arg
-	mov	m,a
-	shld	datptr
-	mvi	a,fqfnl+1
-	sta	datlen
-intcom:	xchg
+	xchg
 	mov	e,m	; default block
 	inx	h
 	mov	d,m
@@ -600,6 +590,21 @@ intcom:	xchg
 	mov	h,m
 	mov	l,a
 	jmp	intdef
+
+; .SERF - DE = buffer, HL = decoded ambiguous file desc
+intfrs:	xchg
+	shld	dmaadr
+	lda	hver
+	lxi	h,arg
+	mov	m,a
+	shld	datptr
+	inx	h	; fqfn
+	lxi	b,14
+	call	$MOVE	; copy into fqfn
+	mvi	a,fqfnl+1
+	sta	datlen
+	; need to check device and map it, but skip .DECODE...
+	jmp	intdf0
 
 ; .RENAM - two file descs at (HL)
 intren:
@@ -634,7 +639,7 @@ intdef:	; DE = def block, HL = file desc
 	lxi	b,fqfn-1
 	SCALL	.DECODE
 	jc	error
-	lhld	dvdnm
+intdf0:	lhld	dvdnm
 	xchg
 	lhld	fqfn
 	call	$CDEHL

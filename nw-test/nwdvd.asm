@@ -347,7 +347,7 @@ nwinit:
 	lxi	d,DEV.RES
 	dad	d
 	mov	a,m
-	ori	DR.PR	; keep ourself in memory
+	ori	DR.PR+DR.IM	; keep ourself in memory
 	mov	m,a
 	pop	psw
 	cpi	DC.LOD
@@ -685,15 +685,15 @@ setrem:	lhld	netadr	; server ID
 ; normally resides in SNIOS?
 netcfg:	db	0	; network status byte
 	db	055h	; this node ID
-	db	0,'sy0'	; NW0 => SY0[00]
-	db	1,'sy1'	; NW1 => SY1[01]
-	db	2,'sy2'	; NW2 => SY2[02]
-	db	3,'sy3'	; NW3 => SY3[03]
-	db	4,'sy4'	; NW4 => SY4[04]
-	db	5,'sy5'	; NW5 => SY5[05]
-	db	6,'sy6'	; NW6 => SY6[06]
-	db	7,'sy7'	; NW7 => SY7[07]
-; TODO	db	0,'lp5'	; LP0 => LP5[00]
+	db	0,'SY0'	; NW0 => SY0[00]
+	db	1,'SY1'	; NW1 => SY1[01]
+	db	2,'SY2'	; NW2 => SY2[02]
+	db	3,'SY3'	; NW3 => SY3[03]
+	db	4,'SY4'	; NW4 => SY4[04]
+	db	5,'SY5'	; NW5 => SY5[05]
+	db	6,'SY6'	; NW6 => SY6[06]
+	db	7,'SY7'	; NW7 => SY7[07]
+; TODO	db	0,'LP5'	; LP0 => LP5[00]
  endif
 
 	end

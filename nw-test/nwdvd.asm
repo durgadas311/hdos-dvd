@@ -219,7 +219,7 @@ nwrd:
 	shld	datptr
 	mvi	a,1
 	sta	datlen
-	jmp	donet
+	jmp	doio
 
 ; DE = dma addr, BC = xfer count (C==0)
 nwwr:
@@ -252,7 +252,7 @@ nwwr:
 	; TODO: need to loop until count == 0
 	mvi	a,0	; 256 (0 if DEBUG)
 	sta	datlen
-	jmp	donet
+	jmp	doio
 
 ; .OPENR
 
@@ -421,6 +421,21 @@ currch:	dw	0
 datptr:	dw	0
 datlen:	db	0
 
+doio:	; TODO: might need to reset FMT, DID, SID on each cycle.
+	call	donet
+	lda	retcod
+	ora	a
+	jnz	retout
+	lhld	dmaadr
+	inr	h	; +256 bytes
+	shld	dmaadr
+	shld	datptr
+	lhld	iocnt
+	dcr	h	; -256 bytes
+	shld	iocnt
+	jnz	doio
+	jmp	retout
+
 ; returns with HL = &chtbl[ch]
 setch:	lda	arg0
 	inr	a
@@ -527,7 +542,15 @@ retout:	lda	retcod
  if DEBUG
 nothing:
 	call	$TYPTX
-	db	' ...',ENL
+	db	' ...',' '+200Q
+	lhld	dmaadr
+	call	hexwrd
+	mvi	a,' '
+	SCALL	.SCOUT
+	lhld	iocnt
+	call	hexwrd
+	mvi	a,NL
+	SCALL	.SCOUT
 	jmp	don0
 
 hxd0:	mvi	a,' '
@@ -539,6 +562,9 @@ hxd:	mov	a,m
 	jnz	hxd0
 	ret
 
+hexwrd:	mov	a,h
+	call	hexout
+	mov	a,l
 hexout:	push	psw
 	rlc
 	rlc

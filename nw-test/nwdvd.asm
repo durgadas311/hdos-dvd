@@ -37,7 +37,7 @@ NDCAP	equ	DT.CR+DT.CW+DT.RN	;read/write/random
 NDMAX	equ	8
 
 	db	DVDFLV		;DEVICE DRIVER FLAG VALUE
-	db	NDCAP		;DEVICE OF READ AND WRITE
+	db	NDCAP		;DEVICE CAPABILITIES
 	db	(1<<NDMAX)-1	;MOUNTED UNIT MASK
 	db	NDMAX		;ONLY 1 UNIT
 	db	NDCAP,NDCAP,NDCAP,NDCAP
@@ -452,8 +452,7 @@ intnxt:	xchg
  if DEBUG
 	lxi	h,dbsrn
 	shld	dbtag
-	mvi	a,EC.EOF
-	sta	retcod
+	call	filser	; sets retcod
  endif
 	lxi	h,arg
 	shld	datptr
@@ -616,8 +615,14 @@ intfrs:	xchg
 	shld	datptr
 	mvi	a,fqfnl+1
 	sta	datlen
+ if DEBUG
+	call	filser
+	xchg		; file desc to HL
+	jmp	intdf0
+ else
 	xchg		; file desc to HL
 	jmp	intdef
+ endif
 
 ; .RENAM - two file descs at (DE),(HL)
 intren:
@@ -634,6 +639,11 @@ intren:
 ; datptr/datlen must already be set
 ; also entering here: .SERF, .RENAM, .CHFLG
 intdef:	; HL = file desc, datptr,datlen already set
+ if DEBUG
+	xra	a
+	sta	retcod
+intdf0:
+ endif
 	xchg	; DE is source of $MOVE
 	lxi	h,fqfn
 	lxi	b,fqfnl
@@ -655,8 +665,6 @@ chkd1:
 	call	chkloc
 	jc	retout
  if DEBUG
-	xra	a
-	sta	retcod
 	lda	mhdr+FNC
 	cpi	.RENAM
 	lxi	h,dbren
@@ -669,10 +677,8 @@ chkd1:
 	jz	gotit
 	cpi	.SERN
 	lxi	h,dbsrn
-	jz	gotit0
+	jz	gotit
 	lxi	h,dbsrf
-gotit0:	mvi	a,EC.EOF
-	sta	retcod
 gotit:	shld	dbtag
  endif
 	call	setrem	; set remote dev name
@@ -686,7 +692,10 @@ error:	sta	retcod
 ; Check local drive config
 ; A = unit number
 ; returns CY if not defined (error).
-chkloc:	add	a
+chkloc:	cpi	'0'
+	jc	chkl0
+	sui	'0'
+chkl0:	add	a
 	inr	a
 	add	a	; A = (A * 4) + 2
 	lxi	h,netcfg
@@ -720,6 +729,40 @@ netcfg:	db	0	; network status byte
 	db	6,'SY6'	; NW6 => SY6[06]
 	db	7,'SY7'	; NW7 => SY7[07]
 ; TODO	db	0,'LP5'	; LP0 => LP5[00]
+
+serbuf:	db	'FILE0',0,0,0,'FOO'
+	db	0,0
+	db	0
+	db	0	; flags
+	db	0
+	dw	55	; FGN/LGN = size
+	db	0	; LSI - not used
+	dw	3b90H	; create date
+	dw	3b9fH	; modify/acces? date
+
+; must preserve DE
+filser:
+	lxi	h,serbuf+4
+	mov	a,m
+	cpi	'9'+1
+	jc	fs0
+	mvi	a,EC.EOF
+	sta	retcod
+	mvi	m,'0'
+	ret
+fs0:	push	d
+	push	h
+	lhld	dmaadr
+	lxi	d,serbuf
+	lxi	b,23
+	call	$MOVE
+	xra	a
+	sta	retcod
+	pop	h
+	inr	m
+	pop	d
+	ret
+
  endif
 
 	end

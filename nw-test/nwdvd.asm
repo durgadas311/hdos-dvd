@@ -422,7 +422,12 @@ datptr:	dw	0
 datlen:	db	0
 
 doio:	; TODO: might need to reset FMT, DID, SID on each cycle.
-	call	donet
+	lda	iocnt+1
+	ora	a
+	jnz	doio0
+	sta	retcod
+	jmp	retout
+doio0:	call	donet
 	lda	retcod
 	ora	a
 	jnz	retout
@@ -433,7 +438,7 @@ doio:	; TODO: might need to reset FMT, DID, SID on each cycle.
 	lhld	iocnt
 	dcr	h	; -256 bytes
 	shld	iocnt
-	jnz	doio
+	jnz	doio0
 	jmp	retout
 
 ; returns with HL = &chtbl[ch]

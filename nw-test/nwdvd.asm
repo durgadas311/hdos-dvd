@@ -260,9 +260,16 @@ nwopr:
  if DEBUG
 	lxi	h,dbopr
 	shld	dbtag
- endif
+	lxi	h,AIO.DIR
+	call	oprchk
+	sta	retcod
+	mvi	a,.OPENR
+	sta	mhdr+FNC
+	jmp	nwoc0
+ else
 	mvi	a,.OPENR
 	jmp	nwoc
+ endif
 
 ; .OPENW
 nwopw:
@@ -287,7 +294,7 @@ nwopu:
 ; B = channel (if used)
 ; DE = parameter (depends on function)
 ; HL = parameter (depends on function)
-; .POSIT:  A = channel, BC = sector (DE)
+; .POSIT:  B = channel, DE = sector
 ; .DELET:  HL = decoded file desc (ambiguous)
 ; .RENAM:  DE = new file desc, HL = old file desc
 ; .CHFLG:  DE = bits/mask, HL = decoded file desc
@@ -360,6 +367,7 @@ nwoc:
  if DEBUG
 	xra	a	; no error
 	sta	retcod
+nwoc0:
  endif
 	lda	S.CACC	; channel number
 	sta	arg0
@@ -514,28 +522,6 @@ donet:
 	call	hxd0
 	mvi	a,NL
 	call	conout
-don0:
-	; fixup READ/WRITE
-	lda	mhdr+FNC
-	cpi	.READ
-	jz	don2
-	ani	80h	; .WRITE?
-	jz	don1
-	; .WRITE - pretend everything was written
-	lhld	iocnt
-	xchg
-	lhld	dmaadr
-	dad	d
-	xchg
-	lxi	b,0
-	jmp	don1
-don2:	; .READ - nothing was returned (EOF)
-	lhld	dmaadr
-	xchg
-	lhld	iocnt
-	mov	c,l
-	mov	b,h
-don1:
  endif
 retout:	lda	retcod
 	ora	a
@@ -555,7 +541,7 @@ nothing:
 	call	hexwrd
 	mvi	a,NL
 	SCALL	.SCOUT
-	jmp	don0
+	jmp	retout
 
 hxd0:	mvi	a,' '
 	call	conout
@@ -744,6 +730,25 @@ serbuf:	db	'FILE0',0,0,0,'FOO'
 	db	0	; LSI - not used
 	dw	3b90H	; create date
 	dw	3b9fH	; modify/acces? date
+
+; Check whether to return EC.FNF or 0 for .OPENR
+; HL = file spec (e.g. AIO.DIR)
+oprchk:	lxi	d,serbuf
+	mvi	b,11
+oc0:	ldax	d
+	cpi	'0'
+	jc	oc1
+	cpi	'9'+2	; might be ':'
+	jc	oc2
+oc1:	cmp	m
+	mvi	a,EC.FNF
+	rnz
+oc2:	inx	h
+	inx	d
+	dcr	b
+	jnz	oc0
+	xra	a
+	ret
 
 ; must preserve DE
 filser:
